@@ -39,7 +39,7 @@ def get_gsm8k_dataset():
 
 def main():
     # 1. Model & Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     
     # Load model (using bfloat16 for Ampere GPUs, use float16 otherwise)
