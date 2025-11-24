@@ -9,12 +9,11 @@ from trl import GRPOConfig, GRPOTrainer
 from math_rewards import correctness_reward_func, format_reward_func, xml_count_reward_func
 
 # --- Config ---
-# Using Qwen 2.5 Math as base allows faster convergence, but you can use Llama/Mistral
 MODEL_ID = "Qwen/Qwen2.5-1.5B-Instruct" 
 OUTPUT_DIR = "output/Qwen-Reasoning-GRPO"
 
 # GRPO specific hyperparameters
-NUM_GENERATIONS = 8     # G: Number of rollouts per prompt (The "Group" in GRPO)
+NUM_GENERATIONS = 8     # G: Number of rollouts per prompt
 MAX_COMPLETION_LEN = 768 # Reasoning traces can be long
 
 def get_gsm8k_dataset():
@@ -42,17 +41,16 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     
-    # Load model (using bfloat16 for Ampere GPUs, use float16 otherwise)
+    # Load model
+    # Note: I changed 'torch_dtype' to 'dtype' to fix your warning
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16, 
         device_map="auto",
         attn_implementation="flash_attention_2"
     )
 
     # 2. LoRA Config
-    # GRPO is memory heavy because it generates G outputs per step. 
-    # PEFT/LoRA is standard to fit this on consumer GPUs.
     peft_config = LoraConfig(
         r=16,
         lora_alpha=64,
@@ -65,7 +63,7 @@ def main():
     # 3. Training Arguments
     training_args = GRPOConfig(
         output_dir=OUTPUT_DIR,
-        learning_rate=5e-6,           # GRPO usually prefers lower LR than SFT
+        learning_rate=5e-6,
         adam_beta1=0.9,
         adam_beta2=0.99,
         weight_decay=0.1,
@@ -73,15 +71,15 @@ def main():
         lr_scheduler_type="cosine",
         logging_steps=1,
         bf16=True,
-        per_device_train_batch_size=1, # Keep small, num_generations increases actual memory usage
-        gradient_accumulation_steps=4,
-        num_generations=NUM_GENERATIONS, # The core GRPO param.
+        per_device_train_batch_size=50,
+        gradient_accumulation_steps=8,
+        num_generations=NUM_GENERATIONS, 
         max_prompt_length=256,
-        max_completion_length=MAX_COMPLETION_LENGTH,
+        max_completion_length=MAX_COMPLETION_LEN, # FIXED: Variable name typo fixed here
         num_train_epochs=1,
         save_steps=100,
-        report_to="none", # Set to 'wandb' for tracking
-        use_vllm=False,   # Enable if vLLM is installed for 3x faster generation
+        report_to="none", 
+        use_vllm=False, 
     )
 
     # 4. Dataset
@@ -91,9 +89,9 @@ def main():
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=[
-            xml_count_reward_func,  # Reward structure (<think> tags)
-            format_reward_func,     # Reward format (think + boxed)
-            correctness_reward_func # Reward Accuracy (The Verifier)
+            xml_count_reward_func,
+            format_reward_func,
+            correctness_reward_func
         ],
         args=training_args,
         train_dataset=dataset,
